@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 2.8)
+#cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.14)
 project(OIS)
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/CmakeModules)
@@ -31,6 +32,9 @@ option(OIS_BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(OIS_BUILD_DEMOS "Build demo applications" ON)
 set(CMAKE_MACOSX_RPATH 0)
 
+add_library(OIS SHARED "")
+
+#[[
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/includes
     ${CMAKE_CURRENT_SOURCE_DIR}/includes/linux
@@ -39,7 +43,18 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/includes/mac
     ${CMAKE_CURRENT_SOURCE_DIR}/includes/win32
 )
+]]
+target_include_directories(OIS
+   PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/includes
+      ${CMAKE_CURRENT_SOURCE_DIR}/includes/linux
+      ${CMAKE_CURRENT_SOURCE_DIR}/includes/SDL
+      ${CMAKE_CURRENT_SOURCE_DIR}/includes/iphone
+      ${CMAKE_CURRENT_SOURCE_DIR}/includes/mac
+      ${CMAKE_CURRENT_SOURCE_DIR}/includes/win32
+)
 
+#[[
 set(ois_source
     ${ois_source}
     "${CMAKE_CURRENT_SOURCE_DIR}/src/OISInputManager.cpp"
@@ -49,6 +64,17 @@ set(ois_source
     "${CMAKE_CURRENT_SOURCE_DIR}/src/OISKeyboard.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/OISForceFeedback.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/OISException.cpp"
+)
+]]
+target_sources(OIS
+   PRIVATE
+      src/OISInputManager.cpp
+      src/OISObject.cpp
+      src/OISEffect.cpp
+      src/OISJoyStick.cpp
+      src/OISKeyboard.cpp
+      src/OISForceFeedback.cpp
+      src/OISException.cpp
 )
 
 set(BUILD_SHARED_LIBS ${OIS_BUILD_SHARED_LIBS})
@@ -114,6 +140,7 @@ if (WIN32)
         add_definitions(-DOIS_WIN32_XINPUT_SUPPORT)
     endif()
 
+#[[
     set(ois_source
         ${ois_source}
         "${CMAKE_CURRENT_SOURCE_DIR}/src/win32/Win32ForceFeedback.cpp"
@@ -122,6 +149,15 @@ if (WIN32)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/win32/Win32KeyBoard.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/win32/Win32Mouse.cpp"
     )
+]]
+    target_sources(OIS
+      PRIVATE
+         src/win32/Win32ForceFeedback.cpp
+         src/win32/Win32InputManager.cpp
+         src/win32/Win32JoyStick.cpp
+         src/win32/Win32KeyBoard.cpp
+         src/win32/Win32Mouse.cpp
+   )
 endif()
 
 if (APPLE)
@@ -153,7 +189,6 @@ endif()
 
 source_group("OIS" FILES ${ois_source})
 
-add_library(OIS ${ois_source})
 
 # This is neccessary to get the dll import/export to work without modifying the
 # source to use cmake's method of setting the dll import/export definitions
@@ -177,11 +212,11 @@ if (WIN32)
     endif()
 
     if (WINDOWSSDK_FOUND)
-        target_link_libraries(OIS "dinput8.lib" "dxguid.lib")
+        target_link_libraries(OIS PRIVATE "dinput8.lib" "dxguid.lib")
     elseif(CMAKE_CROSSCOMPILING)
-        target_link_libraries(OIS "${DINPUT8_LIBRARY}" "${XINPUT8_LIBRARY}" "${DXGUID_LIBRARY}")
+        target_link_libraries(OIS PRIVATE "${DINPUT8_LIBRARY}" "${XINPUT8_LIBRARY}" "${DXGUID_LIBRARY}")
     else()
-        target_link_libraries(OIS "${DXSDK_DIR}/Lib/${DIRECTX_ARCH}/dinput8.lib" "${DXSDK_DIR}/Lib/${DIRECTX_ARCH}/dxguid.lib")
+        target_link_libraries(OIS PRIVATE "${DXSDK_DIR}/Lib/${DIRECTX_ARCH}/dinput8.lib" "${DXSDK_DIR}/Lib/${DIRECTX_ARCH}/dxguid.lib")
     endif()
 endif()
 
@@ -234,22 +269,60 @@ set(OIS_LIB_DIRECTORY ${CMAKE_INSTALL_PREFIX}/${LIB_INSTALL_DIR})
 
 file(GLOB PUBLIC_HEADERS "${CMAKE_SOURCE_DIR}/includes/*.h")
 
-install(FILES ${PUBLIC_HEADERS}
-  DESTINATION include/ois
-)
+# Create oisConfigVersion.cmake.
+#
+# FIXME: SameMajorVersion is correct for stable releases but it is wrong
+# for development releases where each release may have incompatible changes.
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/oisConfigVersion.cmake"
+    VERSION "${OIS_VERSION}"
+    COMPATIBILITY SameMajorVersion)
 
-install(TARGETS OIS
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
+# Create oisConfig.cmake.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/oisConfig.cmake"
+"include(CMakeFindDependencyMacro)
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+find_dependency(Threads)
+include(\"\${CMAKE_CURRENT_LIST_DIR}/oisTargets.cmake\")
+")
+
+# Set CMAKE_INSTALL_LIBDIR and friends.
+include(GNUInstallDirs)
+
+install(TARGETS OIS EXPORT oisTargets
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   FRAMEWORK DESTINATION Library/Frameworks
 )
 
+install(FILES ${PUBLIC_HEADERS}
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/ois"
+)
+
 if(MSVC AND BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:OIS> DESTINATION bin OPTIONAL)
+  install(FILES $<TARGET_PDB_FILE:OIS> DESTINATION "${CMAKE_INSTALL_BINDIR}" OPTIONAL)
 endif(MSVC AND BUILD_SHARED_LIBS)
 
 if(UNIX)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/OIS.pc.in ${CMAKE_BINARY_DIR}/OIS.pc @ONLY)
     install(FILES ${CMAKE_BINARY_DIR}/OIS.pc DESTINATION ${OIS_LIB_DIRECTORY}/pkgconfig)
 endif()
+
+# Install the CMake files that other packages can use to find ois.
+set(ois_INSTALL_CMAKEDIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/ois"
+    CACHE STRING "Path to ois's .cmake files")
+
+install(EXPORT oisTargets
+        NAMESPACE ois::
+        FILE oisTargets.cmake
+        DESTINATION "${ois_INSTALL_CMAKEDIR}"
+        COMPONENT ois_Development)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/oisConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/oisConfigVersion.cmake"
+        DESTINATION "${ois_INSTALL_CMAKEDIR}"
+        COMPONENT ois_Development)
